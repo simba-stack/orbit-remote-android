@@ -140,6 +140,54 @@ class OrbitAccessibilityService : AccessibilityService() {
         return null
     }
 
+    /**
+     * Paste text coming from the PC into the currently focused editable field.
+     *
+     * This is the OEM-proof path: it writes straight into the field via
+     * ACTION_SET_TEXT (no system clipboard, no keyboard needed), so it works on
+     * locked-down ROMs like realme/ColorOS where background clipboard writes and the
+     * IME input-connection are unreliable. The existing field text is preserved and
+     * the pasted text is appended, then the cursor is moved to the end.
+     *
+     * [onResult] is invoked on the main thread: true when a focused editable field
+     * was found and updated, false when there was no field to paste into (so the UI
+     * can tell the user to tap a text field first).
+     */
+    fun pasteFromPc(text: String, onResult: (Boolean) -> Unit) {
+        main.post {
+            val focused = findFocusedEditable(rootInActiveWindow)
+            if (focused == null) {
+                onResult(false)
+                return@post
+            }
+            val existing = focused.text?.toString() ?: ""
+            val combined = if (existing.isEmpty()) text else existing + text
+            val args = Bundle().apply {
+                putCharSequence(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                    combined
+                )
+            }
+            val ok = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            runCatching {
+                val sel = Bundle().apply {
+                    putInt(
+                        AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT,
+                        combined.length
+                    )
+                    putInt(
+                        AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
+                        combined.length
+                    )
+                }
+                focused.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)
+            }
+            // Best-effort: also drop it into the system clipboard for manual paste.
+            runCatching { setClipboard(text) }
+            onResult(ok)
+        }
+    }
+
     private fun launchApp(packageName: String?) {
         if (packageName.isNullOrBlank()) return
         val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return

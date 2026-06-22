@@ -39,12 +39,13 @@ class OrbitAccessibilityService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
-        instance = null
+        // Do NOT null `instance` here: onUnbind can fire while the service is still
+        // alive (e.g. transient rebind), which would silently kill control.
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
-        instance = null
+        if (instance === this) instance = null
         super.onDestroy()
     }
 
@@ -126,8 +127,13 @@ class OrbitAccessibilityService : AccessibilityService() {
 
     private fun findFocusedEditable(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (root == null) return null
-        root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { if (it.isEditable) return it }
-        // Fallback: breadth-first search for an editable node.
+        root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { f ->
+            if (f.isEditable) return f
+            @Suppress("DEPRECATION") runCatching { f.recycle() }
+        }
+        // Fallback: breadth-first search for an editable node. Recycle every node we
+        // visit but do not return, to avoid leaking native AccessibilityNodeInfo
+        // objects on every command (pre-API-33).
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         while (queue.isNotEmpty()) {
@@ -136,6 +142,7 @@ class OrbitAccessibilityService : AccessibilityService() {
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
+            if (node !== root) @Suppress("DEPRECATION") runCatching { node.recycle() }
         }
         return null
     }
@@ -169,16 +176,13 @@ class OrbitAccessibilityService : AccessibilityService() {
                 )
             }
             val ok = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            // Re-read the field: some inputs truncate at maxLength, so combined.length
+            // may overshoot and make ACTION_SET_SELECTION fail.
+            val newLen = focused.text?.length ?: combined.length
             runCatching {
                 val sel = Bundle().apply {
-                    putInt(
-                        AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT,
-                        combined.length
-                    )
-                    putInt(
-                        AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
-                        combined.length
-                    )
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newLen)
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newLen)
                 }
                 focused.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)
             }

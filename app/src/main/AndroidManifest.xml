@@ -53,6 +53,20 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- Input method used only to bridge the system clipboard while controlling. -->
+        <service
+            android:name=".ime.OrbitImeService"
+            android:exported="true"
+            android:label="@string/ime_label"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
         <!-- Restart the agent after reboot / app update. -->
         <receiver
             android:name=".system.BootReceiver"

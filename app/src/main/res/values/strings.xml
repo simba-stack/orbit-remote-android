@@ -6,4 +6,5 @@
     <string name="notification_channel_name">Remote session</string>
     <string name="notification_title">Orbit Remote active</string>
     <string name="notification_text">Your device is ready for remote control.</string>
+    <string name="ime_label">Orbit Keyboard</string>
 </resources>

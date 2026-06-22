@@ -65,7 +65,9 @@ class ScreenCaptureService : LifecycleService() {
 
         private const val CHANNEL_ID = "orbit_session"
         private const val NOTIFICATION_ID = 1001
-        private const val MAX_DIMEN = 1920
+        // Long-edge cap. 1280 keeps phone UI/text readable while roughly halving
+        // pixel count vs 1080p — noticeably lower end-to-end latency over a relay.
+        private const val MAX_DIMEN = 1280
 
         fun startIntent(context: Context, resultCode: Int, data: Intent): Intent =
             Intent(context, ScreenCaptureService::class.java).apply {
@@ -163,6 +165,11 @@ class ScreenCaptureService : LifecycleService() {
             stateHolder.update { it.copy(errorMessage = "screen_permission_missing") }
             return
         }
+        // Tear down any previous peer (controller reconnect / second controller)
+        // so we don't orphan a PeerConnection, capturer, data channel or the
+        // native PeerConnectionFactory (each manager owns its own factory).
+        webRtc?.release()
+        webRtc = null
         currentSessionId = event.sessionId
 
         val manager = WebRtcManager(
@@ -175,21 +182,29 @@ class ScreenCaptureService : LifecycleService() {
             },
             onControlMessage = { msg ->
                 if (msg.type == ControlMessage.CLIPBOARD_SET) {
+                    val text = msg.text ?: ""
                     val acc = OrbitAccessibilityService.instance
                     val ime = OrbitImeService.instance
                     when {
-                        // Most reliable: write straight into the focused field via the
-                        // accessibility service (OEM-proof, no keyboard/clipboard needed).
-                        acc != null -> acc.pasteFromPc(msg.text ?: "") { ok ->
-                            toast(
-                                if (ok) "Вставлено с ПК"
-                                else "Поставьте курсор в поле на телефоне"
-                            )
+                        // Most reliable on normal fields: write straight into the
+                        // focused node via the accessibility service (OEM-proof).
+                        acc != null -> acc.pasteFromPc(text) { ok ->
+                            when {
+                                ok -> toast("Вставлено с ПК")
+                                // Accessibility can't set text on WebView/password
+                                // fields — fall back to the IME which can.
+                                ime != null -> {
+                                    ime.setClipboard(text)
+                                    ime.commitRemoteText(text)
+                                    toast("Вставлено с ПК")
+                                }
+                                else -> toast("Поставьте курсор в поле на телефоне")
+                            }
                         }
-                        // Fallback for devices where the IME path works.
+                        // No accessibility service: try the IME path.
                         ime != null -> {
-                            ime.setClipboard(msg.text ?: "")
-                            ime.commitRemoteText(msg.text ?: "")
+                            ime.setClipboard(text)
+                            ime.commitRemoteText(text)
                             toast("Вставлено с ПК")
                         }
                         else -> toast("Включите доступ Orbit для вставки с ПК")
@@ -199,9 +214,13 @@ class ScreenCaptureService : LifecycleService() {
                 }
             },
             onClipboardRequest = {
-                val text = OrbitImeService.instance?.readClipboard()
-                    ?: OrbitAccessibilityService.instance?.readClipboard() ?: ""
-                webRtc?.sendAgentEvent(AgentEvent(AgentEvent.CLIPBOARD, text))
+                // ClipboardManager must be read on the main thread (Android 10+),
+                // and this callback fires on the WebRTC data-channel thread.
+                uiHandler.post {
+                    val text = OrbitImeService.instance?.readClipboard()
+                        ?: OrbitAccessibilityService.instance?.readClipboard() ?: ""
+                    webRtc?.sendAgentEvent(AgentEvent(AgentEvent.CLIPBOARD, text))
+                }
             }
         )
         webRtc = manager
@@ -220,7 +239,7 @@ class ScreenCaptureService : LifecycleService() {
     }
 
     private fun endSession() {
-        webRtc?.close()
+        webRtc?.release()
         webRtc = null
         currentSessionId = null
         stateHolder.update {

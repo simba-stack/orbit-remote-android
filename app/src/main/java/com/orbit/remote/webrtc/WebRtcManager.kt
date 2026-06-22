@@ -55,6 +55,7 @@ class WebRtcManager(
     private var videoCapturer: ScreenCapturerAndroid? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
+    private var videoSender: org.webrtc.RtpSender? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var dataChannel: DataChannel? = null
 
@@ -63,10 +64,14 @@ class WebRtcManager(
             PeerConnectionFactory.InitializationOptions.builder(context)
                 .createInitializationOptions()
         )
+        // Constrained Baseline (High Profile off): lower encode/decode latency and
+        // universal hardware support — what real-time remote control needs. The
+        // compression loss is negligible for mostly-static screen content once an
+        // explicit bitrate ceiling is set (see applyVideoEncodingParams).
         val encoderFactory = DefaultVideoEncoderFactory(
             eglBase.eglBaseContext,
             /* enableIntelVp8Encoder = */ true,
-            /* enableH264HighProfile = */ true
+            /* enableH264HighProfile = */ false
         )
         val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
         factory = PeerConnectionFactory.builder()
@@ -122,8 +127,37 @@ class WebRtcManager(
 
         val track = factory.createVideoTrack("orbit_video", source)
         track.setEnabled(true)
+        // Screen content: keep text/UI crisp rather than smoothing motion.
+        runCatching { track.setContentHint(VideoTrack.ContentHint.TEXT) }
         videoTrack = track
-        peerConnection?.addTrack(track, listOf("orbit_stream"))
+        videoSender = peerConnection?.addTrack(track, listOf("orbit_stream"))
+        applyVideoEncodingParams(fps)
+    }
+
+    /**
+     * Pin bitrate, framerate and degradation behaviour on the sender. Without this,
+     * libwebrtc caps screen video at ~2 Mbps and lets the bandwidth estimator cut
+     * the frame rate, which is the main cause of laggy/blurry remote screens. The
+     * RtpSender API (not SDP munging) is the correct way to do this in
+     * stream-webrtc-android. The parameters object is a copy, so it must be
+     * reassigned after mutation.
+     */
+    private fun applyVideoEncodingParams(targetFps: Int) {
+        val sender = videoSender ?: return
+        runCatching {
+            val params = sender.parameters ?: return
+            if (params.encodings.isEmpty()) return
+            // Keep resolution sharp (readable text), let frame rate flex under
+            // congestion — a brief fps dip beats a permanently blurry screen.
+            params.degradationPreference =
+                org.webrtc.RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+            params.encodings[0].apply {
+                maxBitrateBps = 8_000_000
+                minBitrateBps = 1_000_000
+                maxFramerate = targetFps
+            }
+            sender.parameters = params
+        }
     }
 
     /** Apply an offer or ICE candidate relayed from the controller. */
@@ -179,6 +213,7 @@ class WebRtcManager(
         surfaceTextureHelper = null
         videoSource = null
         videoTrack = null
+        videoSender = null
         dataChannel = null
         peerConnection = null
     }

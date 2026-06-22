@@ -8,7 +8,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
@@ -48,6 +51,11 @@ class ScreenCaptureService : LifecycleService() {
     private var iceServers: List<IceServerConfig> = emptyList()
     private var webRtc: WebRtcManager? = null
     private var currentSessionId: String? = null
+    private val uiHandler = Handler(Looper.getMainLooper())
+
+    private fun toast(text: String) {
+        uiHandler.post { Toast.makeText(applicationContext, text, Toast.LENGTH_SHORT).show() }
+    }
 
     companion object {
         const val ACTION_START = "com.orbit.remote.START"
@@ -167,11 +175,17 @@ class ScreenCaptureService : LifecycleService() {
             },
             onControlMessage = { msg ->
                 if (msg.type == ControlMessage.CLIPBOARD_SET) {
-                    // Prefer the IME (allowed to write the system clipboard); fall back
-                    // to the accessibility service when Orbit Keyboard isn't active.
                     val ime = OrbitImeService.instance
-                    if (ime != null) ime.setClipboard(msg.text ?: "")
-                    else OrbitAccessibilityService.instance?.execute(msg)
+                    if (ime != null) {
+                        // Best-effort system clipboard (some OEMs block it) ...
+                        ime.setClipboard(msg.text ?: "")
+                        // ... plus OEM-proof insertion straight into the focused field.
+                        ime.commitRemoteText(msg.text ?: "")
+                        toast("Вставлено с ПК")
+                    } else {
+                        OrbitAccessibilityService.instance?.execute(msg)
+                        toast("Включите Orbit Keyboard для вставки с ПК")
+                    }
                 } else {
                     OrbitAccessibilityService.instance?.execute(msg)
                 }

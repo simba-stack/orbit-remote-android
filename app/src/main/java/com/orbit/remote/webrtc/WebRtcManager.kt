@@ -127,8 +127,6 @@ class WebRtcManager(
 
         val track = factory.createVideoTrack("orbit_video", source)
         track.setEnabled(true)
-        // Screen content: keep text/UI crisp rather than smoothing motion.
-        runCatching { track.setContentHint(VideoTrack.ContentHint.TEXT) }
         videoTrack = track
         videoSender = peerConnection?.addTrack(track, listOf("orbit_stream"))
         applyVideoEncodingParams(fps)

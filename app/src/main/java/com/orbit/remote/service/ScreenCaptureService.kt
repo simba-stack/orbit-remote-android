@@ -175,16 +175,24 @@ class ScreenCaptureService : LifecycleService() {
             },
             onControlMessage = { msg ->
                 if (msg.type == ControlMessage.CLIPBOARD_SET) {
+                    val acc = OrbitAccessibilityService.instance
                     val ime = OrbitImeService.instance
-                    if (ime != null) {
-                        // Best-effort system clipboard (some OEMs block it) ...
-                        ime.setClipboard(msg.text ?: "")
-                        // ... plus OEM-proof insertion straight into the focused field.
-                        ime.commitRemoteText(msg.text ?: "")
-                        toast("Вставлено с ПК")
-                    } else {
-                        OrbitAccessibilityService.instance?.execute(msg)
-                        toast("Включите Orbit Keyboard для вставки с ПК")
+                    when {
+                        // Most reliable: write straight into the focused field via the
+                        // accessibility service (OEM-proof, no keyboard/clipboard needed).
+                        acc != null -> acc.pasteFromPc(msg.text ?: "") { ok ->
+                            toast(
+                                if (ok) "Вставлено с ПК"
+                                else "Поставьте курсор в поле на телефоне"
+                            )
+                        }
+                        // Fallback for devices where the IME path works.
+                        ime != null -> {
+                            ime.setClipboard(msg.text ?: "")
+                            ime.commitRemoteText(msg.text ?: "")
+                            toast("Вставлено с ПК")
+                        }
+                        else -> toast("Включите доступ Orbit для вставки с ПК")
                     }
                 } else {
                     OrbitAccessibilityService.instance?.execute(msg)

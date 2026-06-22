@@ -53,9 +53,15 @@ class OrbitImeService : InputMethodService() {
         }
     }
 
-    /** Insert text at the cursor of the focused field (used as a fallback path). */
+    /**
+     * Insert text at the cursor of the focused field. This is OEM-proof: it works
+     * even when the device blocks system-clipboard writes, because the IME writes
+     * directly into the field via its input connection. Runs on the main thread.
+     */
     fun commitRemoteText(text: String) {
-        currentInputConnection?.commitText(text, 1)
+        mainHandler.post {
+            runCatching { currentInputConnection?.commitText(text, 1) }
+        }
     }
 
     fun backspace() {

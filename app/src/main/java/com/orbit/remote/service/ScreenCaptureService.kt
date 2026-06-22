@@ -21,6 +21,8 @@ import com.orbit.remote.data.signaling.SignalingClient
 import com.orbit.remote.data.signaling.SignalingEvent
 import com.orbit.remote.domain.model.AgentEvent
 import com.orbit.remote.domain.model.ConnectionState
+import com.orbit.remote.domain.model.ControlMessage
+import com.orbit.remote.ime.OrbitImeService
 import com.orbit.remote.ui.MainActivity
 import com.orbit.remote.webrtc.WebRtcManager
 import dagger.hilt.android.AndroidEntryPoint
@@ -163,9 +165,20 @@ class ScreenCaptureService : LifecycleService() {
             onLocalSignal = { signalData ->
                 currentSessionId?.let { signalingClient.sendSignal(it, signalData) }
             },
-            onControlMessage = { msg -> OrbitAccessibilityService.instance?.execute(msg) },
+            onControlMessage = { msg ->
+                if (msg.type == ControlMessage.CLIPBOARD_SET) {
+                    // Prefer the IME (allowed to write the system clipboard); fall back
+                    // to the accessibility service when Orbit Keyboard isn't active.
+                    val ime = OrbitImeService.instance
+                    if (ime != null) ime.setClipboard(msg.text ?: "")
+                    else OrbitAccessibilityService.instance?.execute(msg)
+                } else {
+                    OrbitAccessibilityService.instance?.execute(msg)
+                }
+            },
             onClipboardRequest = {
-                val text = OrbitAccessibilityService.instance?.readClipboard() ?: ""
+                val text = OrbitImeService.instance?.readClipboard()
+                    ?: OrbitAccessibilityService.instance?.readClipboard() ?: ""
                 webRtc?.sendAgentEvent(AgentEvent(AgentEvent.CLIPBOARD, text))
             }
         )

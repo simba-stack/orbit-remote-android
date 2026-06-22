@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.inputmethodservice.InputMethodService
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.widget.TextView
@@ -60,10 +62,20 @@ class OrbitImeService : InputMethodService() {
         currentInputConnection?.deleteSurroundingText(1, 0)
     }
 
-    /** Set the system clipboard — allowed because this is an IME. */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * Set the system clipboard — allowed because this is an IME. Must run on the
+     * main thread: it is called from the WebRTC data-channel thread, and
+     * setPrimaryClip fails/throws off the main looper on many Android builds.
+     */
     fun setClipboard(text: String) {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("orbit", text))
+        mainHandler.post {
+            runCatching {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("orbit", text))
+            }
+        }
     }
 
     fun readClipboard(): String {

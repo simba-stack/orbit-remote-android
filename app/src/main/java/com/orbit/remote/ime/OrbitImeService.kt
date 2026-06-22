@@ -65,7 +65,9 @@ class OrbitImeService : InputMethodService() {
     }
 
     fun backspace() {
-        currentInputConnection?.deleteSurroundingText(1, 0)
+        mainHandler.post {
+            runCatching { currentInputConnection?.deleteSurroundingText(1, 0) }
+        }
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())

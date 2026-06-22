@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Orbit Remote</string>
+    <string name="accessibility_label">Orbit Remote Control</string>
+    <string name="accessibility_description">Allows Orbit Remote to perform taps, swipes and text input on this device when you connect from your computer.</string>
+    <string name="notification_channel_name">Remote session</string>
+    <string name="notification_title">Orbit Remote active</string>
+    <string name="notification_text">Your device is ready for remote control.</string>
+</resources>

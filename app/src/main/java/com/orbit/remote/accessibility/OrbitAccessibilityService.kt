@@ -1,6 +1,7 @@
 package com.orbit.remote.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityService.GestureResultCallback
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
@@ -90,10 +91,34 @@ class OrbitAccessibilityService : AccessibilityService() {
         }
     }
 
+    // dispatchGesture cannot run two gestures at once — a second call while one is
+    // in flight is silently dropped. Under any latency taps/swipes arrive bunched,
+    // so without serialization most are lost (the "1 in 10 works" / "wrong key"
+    // symptom). We queue gestures and chain them via the completion callback.
+    private val gestureQueue = ArrayDeque<GestureDescription>()
+    private var gestureRunning = false
+
+    private fun enqueueGesture(gesture: GestureDescription) {
+        gestureQueue.addLast(gesture)
+        if (gestureQueue.size > 32) gestureQueue.removeFirst() // bound under burst
+        pumpGestures()
+    }
+
+    private fun pumpGestures() {
+        if (gestureRunning) return
+        val gesture = gestureQueue.removeFirstOrNull() ?: return
+        gestureRunning = true
+        val cb = object : GestureResultCallback() {
+            override fun onCompleted(d: GestureDescription?) { gestureRunning = false; pumpGestures() }
+            override fun onCancelled(d: GestureDescription?) { gestureRunning = false; pumpGestures() }
+        }
+        if (!dispatchGesture(gesture, cb, main)) { gestureRunning = false; pumpGestures() }
+    }
+
     private fun tap(x: Float, y: Float, durationMs: Long) {
         val path = Path().apply { moveTo(x, y) }
         val stroke = GestureDescription.StrokeDescription(path, 0, max(1, durationMs))
-        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+        enqueueGesture(GestureDescription.Builder().addStroke(stroke).build())
     }
 
     private fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long) {
@@ -102,7 +127,7 @@ class OrbitAccessibilityService : AccessibilityService() {
             lineTo(x2, y2)
         }
         val stroke = GestureDescription.StrokeDescription(path, 0, max(1, durationMs))
-        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+        enqueueGesture(GestureDescription.Builder().addStroke(stroke).build())
     }
 
     private fun globalKey(key: String?) {

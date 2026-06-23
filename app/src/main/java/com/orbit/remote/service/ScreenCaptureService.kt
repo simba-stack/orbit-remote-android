@@ -82,7 +82,9 @@ class ScreenCaptureService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        eglBase = EglBase.create()
+        // Use the process-shared EglBase (same one the shared PeerConnectionFactory
+        // is built on) so capture and the factory never mix EGL contexts.
+        eglBase = WebRtcManager.sharedEglBase()
         observeSignaling()
     }
 
@@ -165,10 +167,11 @@ class ScreenCaptureService : LifecycleService() {
             stateHolder.update { it.copy(errorMessage = "screen_permission_missing") }
             return
         }
-        // Tear down any previous peer (controller reconnect / second controller)
-        // so we don't orphan a PeerConnection, capturer, data channel or the
-        // native PeerConnectionFactory (each manager owns its own factory).
-        webRtc?.release()
+        // Tear down any previous peer (controller reconnect / second controller).
+        // Use close() NOT release(): close() frees the PeerConnection/capturer but
+        // keeps the native factory alive. Disposing+recreating the factory per
+        // session crashes the native WebRTC layer.
+        webRtc?.close()
         webRtc = null
         currentSessionId = event.sessionId
 
@@ -239,7 +242,7 @@ class ScreenCaptureService : LifecycleService() {
     }
 
     private fun endSession() {
-        webRtc?.release()
+        webRtc?.close()
         webRtc = null
         currentSessionId = null
         stateHolder.update {
@@ -272,7 +275,7 @@ class ScreenCaptureService : LifecycleService() {
     override fun onDestroy() {
         webRtc?.release()
         webRtc = null
-        runCatching { eglBase.release() }
+        // Do NOT release eglBase: it is process-shared and reused by later sessions.
         super.onDestroy()
     }
 

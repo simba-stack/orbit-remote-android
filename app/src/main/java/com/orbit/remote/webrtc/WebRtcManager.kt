@@ -55,7 +55,6 @@ class WebRtcManager(
     private var videoCapturer: ScreenCapturerAndroid? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
-    private var videoSender: org.webrtc.RtpSender? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var dataChannel: DataChannel? = null
 
@@ -128,37 +127,7 @@ class WebRtcManager(
         val track = factory.createVideoTrack("orbit_video", source)
         track.setEnabled(true)
         videoTrack = track
-        videoSender = peerConnection?.addTrack(track, listOf("orbit_stream"))
-        applyVideoEncodingParams(fps)
-    }
-
-    /**
-     * Pin bitrate, framerate and degradation behaviour on the sender.
-     *
-     * CRITICAL for remote control: the video track shares the same transport as the
-     * control data channel (taps/swipes). A high video ceiling saturates a
-     * relayed/mobile uplink, queues the data channel and makes taps arrive late and
-     * bunched — so they collide in dispatchGesture and most get dropped. We keep a
-     * MODEST cap and BALANCED degradation so video yields bandwidth under congestion
-     * and control stays responsive. The parameters object is a copy and must be
-     * reassigned after mutation.
-     */
-    private fun applyVideoEncodingParams(targetFps: Int) {
-        val sender = videoSender ?: return
-        runCatching {
-            val params = sender.parameters ?: return
-            if (params.encodings.isEmpty()) return
-            // BALANCED: scale both resolution and frame rate down under congestion,
-            // freeing the link for control commands.
-            params.degradationPreference =
-                org.webrtc.RtpParameters.DegradationPreference.BALANCED
-            params.encodings[0].apply {
-                maxBitrateBps = 2_500_000   // plenty for a 1280-capped screen over a relay
-                minBitrateBps = 300_000     // allow it to drop low so control never starves
-                maxFramerate = targetFps
-            }
-            sender.parameters = params
-        }
+        peerConnection?.addTrack(track, listOf("orbit_stream"))
     }
 
     /** Apply an offer or ICE candidate relayed from the controller. */
@@ -214,7 +183,6 @@ class WebRtcManager(
         surfaceTextureHelper = null
         videoSource = null
         videoTrack = null
-        videoSender = null
         dataChannel = null
         peerConnection = null
     }

@@ -1,7 +1,6 @@
 package com.orbit.remote.accessibility
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityService.GestureResultCallback
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
@@ -92,33 +91,32 @@ class OrbitAccessibilityService : AccessibilityService() {
     }
 
     // dispatchGesture cannot run two gestures at once — a second call while one is
-    // in flight is silently dropped. Under any latency taps/swipes arrive bunched,
-    // so without serialization most are lost (the "1 in 10 works" / "wrong key"
-    // symptom). We queue gestures and chain them via the completion callback.
-    private val gestureQueue = ArrayDeque<GestureDescription>()
+    // in flight is silently dropped, so bunched taps get lost. We serialize them in
+    // a small queue and release strictly BY TIME (the gesture's own duration + a
+    // margin). This is deliberately NOT tied to the completion callback, because a
+    // missed callback would otherwise wedge the queue and block all input.
+    private val gestureQueue = ArrayDeque<Pair<GestureDescription, Long>>()
     private var gestureRunning = false
 
-    private fun enqueueGesture(gesture: GestureDescription) {
-        gestureQueue.addLast(gesture)
-        if (gestureQueue.size > 32) gestureQueue.removeFirst() // bound under burst
+    private fun enqueueGesture(gesture: GestureDescription, durationMs: Long) {
+        gestureQueue.addLast(gesture to durationMs)
+        if (gestureQueue.size > 24) gestureQueue.removeFirst() // drop stale under burst
         pumpGestures()
     }
 
     private fun pumpGestures() {
         if (gestureRunning) return
-        val gesture = gestureQueue.removeFirstOrNull() ?: return
+        val next = gestureQueue.removeFirstOrNull() ?: return
         gestureRunning = true
-        val cb = object : GestureResultCallback() {
-            override fun onCompleted(d: GestureDescription?) { gestureRunning = false; pumpGestures() }
-            override fun onCancelled(d: GestureDescription?) { gestureRunning = false; pumpGestures() }
-        }
-        if (!dispatchGesture(gesture, cb, main)) { gestureRunning = false; pumpGestures() }
+        runCatching { dispatchGesture(next.first, null, null) }
+        main.postDelayed({ gestureRunning = false; pumpGestures() }, next.second + 60)
     }
 
     private fun tap(x: Float, y: Float, durationMs: Long) {
         val path = Path().apply { moveTo(x, y) }
-        val stroke = GestureDescription.StrokeDescription(path, 0, max(1, durationMs))
-        enqueueGesture(GestureDescription.Builder().addStroke(stroke).build())
+        val dur = max(1, durationMs)
+        val stroke = GestureDescription.StrokeDescription(path, 0, dur)
+        enqueueGesture(GestureDescription.Builder().addStroke(stroke).build(), dur)
     }
 
     private fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long) {
@@ -126,8 +124,9 @@ class OrbitAccessibilityService : AccessibilityService() {
             moveTo(x1, y1)
             lineTo(x2, y2)
         }
-        val stroke = GestureDescription.StrokeDescription(path, 0, max(1, durationMs))
-        enqueueGesture(GestureDescription.Builder().addStroke(stroke).build())
+        val dur = max(1, durationMs)
+        val stroke = GestureDescription.StrokeDescription(path, 0, dur)
+        enqueueGesture(GestureDescription.Builder().addStroke(stroke).build(), dur)
     }
 
     private fun globalKey(key: String?) {

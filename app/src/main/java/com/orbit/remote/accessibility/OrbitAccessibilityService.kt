@@ -90,33 +90,10 @@ class OrbitAccessibilityService : AccessibilityService() {
         }
     }
 
-    // dispatchGesture cannot run two gestures at once — a second call while one is
-    // in flight is silently dropped, so bunched taps get lost. We serialize them in
-    // a small queue and release strictly BY TIME (the gesture's own duration + a
-    // margin). This is deliberately NOT tied to the completion callback, because a
-    // missed callback would otherwise wedge the queue and block all input.
-    private val gestureQueue = ArrayDeque<Pair<GestureDescription, Long>>()
-    private var gestureRunning = false
-
-    private fun enqueueGesture(gesture: GestureDescription, durationMs: Long) {
-        gestureQueue.addLast(gesture to durationMs)
-        if (gestureQueue.size > 24) gestureQueue.removeFirst() // drop stale under burst
-        pumpGestures()
-    }
-
-    private fun pumpGestures() {
-        if (gestureRunning) return
-        val next = gestureQueue.removeFirstOrNull() ?: return
-        gestureRunning = true
-        runCatching { dispatchGesture(next.first, null, null) }
-        main.postDelayed({ gestureRunning = false; pumpGestures() }, next.second + 60)
-    }
-
     private fun tap(x: Float, y: Float, durationMs: Long) {
         val path = Path().apply { moveTo(x, y) }
-        val dur = max(1, durationMs)
-        val stroke = GestureDescription.StrokeDescription(path, 0, dur)
-        enqueueGesture(GestureDescription.Builder().addStroke(stroke).build(), dur)
+        val stroke = GestureDescription.StrokeDescription(path, 0, max(1, durationMs))
+        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
     }
 
     private fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long) {
@@ -124,9 +101,8 @@ class OrbitAccessibilityService : AccessibilityService() {
             moveTo(x1, y1)
             lineTo(x2, y2)
         }
-        val dur = max(1, durationMs)
-        val stroke = GestureDescription.StrokeDescription(path, 0, dur)
-        enqueueGesture(GestureDescription.Builder().addStroke(stroke).build(), dur)
+        val stroke = GestureDescription.StrokeDescription(path, 0, max(1, durationMs))
+        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
     }
 
     private fun globalKey(key: String?) {

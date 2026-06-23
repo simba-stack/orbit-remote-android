@@ -236,14 +236,15 @@ class ScreenCaptureService : LifecycleService() {
         webRtc = manager
 
         val (w, h) = captureDimensions()
-        val started = runCatching { manager.start(data, w, h, 30) }.isSuccess
+        val started = runCatching { manager.start(data, w, h, 30) }
+            .onFailure { android.util.Log.e("Orbit", "capture start failed", it) }
+            .isSuccess
         if (!started) {
-            // The projection token was revoked by the OS (rare). Drop it and ask for
-            // consent again instead of crash-looping under START_STICKY.
+            // Capture failed this attempt. Clean up the half-built session but KEEP
+            // projectionData so the next connect can retry without re-approval.
             webRtc?.close()
             webRtc = null
-            projectionData = null
-            stateHolder.update { it.copy(errorMessage = "screen_permission_missing") }
+            stateHolder.update { it.copy(errorMessage = "capture_failed") }
             return
         }
 

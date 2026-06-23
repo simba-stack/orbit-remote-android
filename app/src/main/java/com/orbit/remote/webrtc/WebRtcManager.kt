@@ -61,6 +61,7 @@ class WebRtcManager(
     private var videoSender: org.webrtc.RtpSender? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var dataChannel: DataChannel? = null
+    @Volatile private var closing = false
 
     companion object {
         @Volatile private var initialized = false
@@ -134,8 +135,9 @@ class WebRtcManager(
 
         val capturer = ScreenCapturerAndroid(projectionData, object : MediaProjection.Callback() {
             override fun onStop() {
-                // System revoked the projection (e.g. user stopped sharing).
-                close()
+                // dispose() fires this callback re-entrantly during our own teardown;
+                // ignore it then. Only react to a genuine system revoke.
+                if (!closing) close()
             }
         })
         videoCapturer = capturer
@@ -221,6 +223,10 @@ class WebRtcManager(
     }
 
     fun close() {
+        // Re-entrancy guard: capturer.dispose() fires MediaProjection.Callback.onStop
+        // which would call close() again → double-dispose → native crash.
+        if (closing) return
+        closing = true
         runCatching { videoCapturer?.stopCapture() }
         runCatching { videoCapturer?.dispose() }
         runCatching { surfaceTextureHelper?.dispose() }
@@ -234,6 +240,7 @@ class WebRtcManager(
         videoSender = null
         dataChannel = null
         peerConnection = null
+        closing = false
     }
 
     fun release() {

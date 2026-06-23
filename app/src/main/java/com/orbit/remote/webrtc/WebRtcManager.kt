@@ -133,11 +133,14 @@ class WebRtcManager(
     }
 
     /**
-     * Pin bitrate, framerate and degradation behaviour on the sender. Without this,
-     * libwebrtc caps screen video at ~2 Mbps and lets the bandwidth estimator cut
-     * the frame rate, which is the main cause of laggy/blurry remote screens. The
-     * RtpSender API (not SDP munging) is the correct way to do this in
-     * stream-webrtc-android. The parameters object is a copy, so it must be
+     * Pin bitrate, framerate and degradation behaviour on the sender.
+     *
+     * CRITICAL for remote control: the video track shares the same transport as the
+     * control data channel (taps/swipes). A high video ceiling saturates a
+     * relayed/mobile uplink, queues the data channel and makes taps arrive late and
+     * bunched — so they collide in dispatchGesture and most get dropped. We keep a
+     * MODEST cap and BALANCED degradation so video yields bandwidth under congestion
+     * and control stays responsive. The parameters object is a copy and must be
      * reassigned after mutation.
      */
     private fun applyVideoEncodingParams(targetFps: Int) {
@@ -145,13 +148,13 @@ class WebRtcManager(
         runCatching {
             val params = sender.parameters ?: return
             if (params.encodings.isEmpty()) return
-            // Keep resolution sharp (readable text), let frame rate flex under
-            // congestion — a brief fps dip beats a permanently blurry screen.
+            // BALANCED: scale both resolution and frame rate down under congestion,
+            // freeing the link for control commands.
             params.degradationPreference =
-                org.webrtc.RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+                org.webrtc.RtpParameters.DegradationPreference.BALANCED
             params.encodings[0].apply {
-                maxBitrateBps = 8_000_000
-                minBitrateBps = 1_000_000
+                maxBitrateBps = 2_500_000   // plenty for a 1280-capped screen over a relay
+                minBitrateBps = 300_000     // allow it to drop low so control never starves
                 maxFramerate = targetFps
             }
             sender.parameters = params

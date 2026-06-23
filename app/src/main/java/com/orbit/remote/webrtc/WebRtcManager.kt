@@ -49,7 +49,10 @@ class WebRtcManager(
     private val onControlMessage: (ControlMessage) -> Unit,
     private val onClipboardRequest: () -> Unit
 ) {
-    private val factory: PeerConnectionFactory
+    // Process-shared factory: PeerConnectionFactory.initialize() and the factory
+    // itself must be created exactly ONCE per process. Re-initializing per session
+    // crashes the native WebRTC layer (the "crashes every other reconnect" bug).
+    private val factory: PeerConnectionFactory = obtainFactory(context)
     private var peerConnection: PeerConnection? = null
 
     private var videoCapturer: ScreenCapturerAndroid? = null
@@ -58,25 +61,42 @@ class WebRtcManager(
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var dataChannel: DataChannel? = null
 
-    init {
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(context)
-                .createInitializationOptions()
-        )
-        // Constrained Baseline (High Profile off): lower encode/decode latency and
-        // universal hardware support — what real-time remote control needs. The
-        // compression loss is negligible for mostly-static screen content once an
-        // explicit bitrate ceiling is set (see applyVideoEncodingParams).
-        val encoderFactory = DefaultVideoEncoderFactory(
-            eglBase.eglBaseContext,
-            /* enableIntelVp8Encoder = */ true,
-            /* enableH264HighProfile = */ false
-        )
-        val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
-        factory = PeerConnectionFactory.builder()
-            .setVideoEncoderFactory(encoderFactory)
-            .setVideoDecoderFactory(decoderFactory)
-            .createPeerConnectionFactory()
+    companion object {
+        @Volatile private var initialized = false
+        @Volatile private var sharedEgl: EglBase? = null
+        @Volatile private var sharedFactory: PeerConnectionFactory? = null
+
+        /** One EglBase for the whole process; used by both the factory and capture. */
+        @Synchronized
+        fun sharedEglBase(): EglBase =
+            sharedEgl ?: EglBase.create().also { sharedEgl = it }
+
+        /** One PeerConnectionFactory for the whole process; never disposed on the fly. */
+        @Synchronized
+        private fun obtainFactory(context: Context): PeerConnectionFactory {
+            sharedFactory?.let { return it }
+            if (!initialized) {
+                PeerConnectionFactory.initialize(
+                    PeerConnectionFactory.InitializationOptions
+                        .builder(context.applicationContext)
+                        .createInitializationOptions()
+                )
+                initialized = true
+            }
+            val egl = sharedEglBase()
+            // Constrained Baseline (High Profile off): lower encode/decode latency.
+            val encoderFactory = DefaultVideoEncoderFactory(
+                egl.eglBaseContext,
+                /* enableIntelVp8Encoder = */ true,
+                /* enableH264HighProfile = */ false
+            )
+            val decoderFactory = DefaultVideoDecoderFactory(egl.eglBaseContext)
+            return PeerConnectionFactory.builder()
+                .setVideoEncoderFactory(encoderFactory)
+                .setVideoDecoderFactory(decoderFactory)
+                .createPeerConnectionFactory()
+                .also { sharedFactory = it }
+        }
     }
 
     /**
@@ -188,8 +208,9 @@ class WebRtcManager(
     }
 
     fun release() {
+        // The factory and EglBase are process-shared and reused across sessions;
+        // never dispose them mid-process. Per-session natives are freed in close().
         close()
-        runCatching { factory.dispose() }
     }
 
     // ---- Observers --------------------------------------------------------

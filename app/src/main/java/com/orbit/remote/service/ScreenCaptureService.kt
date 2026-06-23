@@ -236,7 +236,16 @@ class ScreenCaptureService : LifecycleService() {
         webRtc = manager
 
         val (w, h) = captureDimensions()
-        manager.start(data, w, h, 30)
+        val started = runCatching { manager.start(data, w, h, 30) }.isSuccess
+        if (!started) {
+            // The projection token was revoked by the OS (rare). Drop it and ask for
+            // consent again instead of crash-looping under START_STICKY.
+            webRtc?.close()
+            webRtc = null
+            projectionData = null
+            stateHolder.update { it.copy(errorMessage = "screen_permission_missing") }
+            return
+        }
 
         stateHolder.update {
             it.copy(
@@ -258,9 +267,11 @@ class ScreenCaptureService : LifecycleService() {
     }
 
     private fun captureDimensions(): Pair<Int, Int> {
-        val metrics = resources.displayMetrics
-        var w = metrics.widthPixels
-        var h = metrics.heightPixels
+        // Use the full physical display size (matches the accessibility tap mapping),
+        // so taps line up on OEMs whose displayMetrics excludes the nav bar.
+        val (realW, realH) = com.orbit.remote.util.DisplayMetricsCompat.realSize(this)
+        var w = realW
+        var h = realH
         val longer = maxOf(w, h)
         if (longer > MAX_DIMEN) {
             val scale = MAX_DIMEN.toFloat() / longer

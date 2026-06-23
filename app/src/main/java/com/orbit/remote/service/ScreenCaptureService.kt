@@ -113,10 +113,17 @@ class ScreenCaptureService : LifecycleService() {
     private fun connectSignaling() {
         lifecycleScope.launch {
             val url = settings.signalingUrl.first()
-            val savedId = settings.deviceId.first()
+            // Fall back to a stable device-derived id/code so they never reset on
+            // reinstall or server restart (the agent proposes them; the server keeps
+            // the same values).
+            val savedId = settings.deviceId.first()?.takeIf { it.isNotBlank() }
+                ?: deviceInfo.stableDeviceId()
+            val savedCode = settings.code.first()?.takeIf { it.isNotBlank() }
+                ?: deviceInfo.stableCode()
             signalingClient.connect(url)
             signalingClient.setRegistration(
                 deviceId = savedId,
+                code = savedCode,
                 name = deviceInfo.displayName(),
                 platform = "android"
             )

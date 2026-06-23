@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
+import android.provider.Settings
 import com.orbit.remote.domain.model.DeviceInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.net.Inet4Address
@@ -36,6 +37,29 @@ class DeviceInfoProvider @Inject constructor(
     }
 
     fun displayName(): String = "${Build.MANUFACTURER} ${Build.MODEL}"
+
+    /**
+     * Stable, deterministic Device ID derived from the hardware ANDROID_ID. Unlike a
+     * server-minted id stored in app data, this survives app reinstalls (same signing
+     * key) and server restarts, so the user's saved device never "resets" on its own.
+     * 9 digits, first digit non-zero.
+     */
+    fun stableDeviceId(): String {
+        val h = (androidSeed().hashCode().toLong() and 0xFFFFFFFFL)
+        val n = h % 900_000_000L + 100_000_000L
+        return n.toString()
+    }
+
+    /** Stable, deterministic 6-digit connection code derived from the same seed. */
+    fun stableCode(): String {
+        val h = ((androidSeed() + "#orbit-code").hashCode().toLong() and 0xFFFFFFFFL)
+        return (h % 1_000_000L).toString().padStart(6, '0')
+    }
+
+    private fun androidSeed(): String =
+        runCatching {
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: (Build.FINGERPRINT ?: "orbit")
 
     private fun batteryPercent(): Int {
         val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

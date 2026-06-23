@@ -268,11 +268,15 @@ class ScreenCaptureService : LifecycleService() {
     }
 
     private fun captureDimensions(): Pair<Int, Int> {
-        // Use the full physical display size (matches the accessibility tap mapping),
-        // so taps line up on OEMs whose displayMetrics excludes the nav bar.
-        val (realW, realH) = com.orbit.remote.util.DisplayMetricsCompat.realSize(this)
-        var w = realW
-        var h = realH
+        // Use resources.displayMetrics for the CAPTURE size — it's the value that
+        // ScreenCapturerAndroid accepts on every device (some OEM encoders reject the
+        // raw physical size). Tap accuracy does NOT depend on this: the capturer
+        // mirrors the whole display into this frame, so coordinates stay proportional;
+        // the accessibility mapping uses the full physical size (DisplayMetricsCompat)
+        // to land taps correctly regardless of the capture resolution.
+        val metrics = resources.displayMetrics
+        var w = metrics.widthPixels
+        var h = metrics.heightPixels
         val longer = maxOf(w, h)
         if (longer > MAX_DIMEN) {
             val scale = MAX_DIMEN.toFloat() / longer

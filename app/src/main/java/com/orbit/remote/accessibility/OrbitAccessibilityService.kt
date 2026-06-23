@@ -52,8 +52,11 @@ class OrbitAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) { /* not needed */ }
     override fun onInterrupt() {}
 
-    private fun screenWidth(): Int = resources.displayMetrics.widthPixels
-    private fun screenHeight(): Int = resources.displayMetrics.heightPixels
+    // Use the FULL physical display size (matches what MediaProjection captures and
+    // what the controller normalizes against), not resources.displayMetrics which
+    // excludes the nav bar on some OEMs (Tecno/HiOS) and offsets taps.
+    private fun screenWidth(): Int = com.orbit.remote.util.DisplayMetricsCompat.realSize(this).first
+    private fun screenHeight(): Int = com.orbit.remote.util.DisplayMetricsCompat.realSize(this).second
 
     /** Entry point for control commands coming from the controller. */
     fun execute(msg: ControlMessage) {

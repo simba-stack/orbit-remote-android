@@ -45,7 +45,7 @@ class SignalingClient(
     private var reconnectAttempts = 0
 
     // Registration parameters, re-applied on every reconnect.
-    private data class Registration(val deviceId: String?, val name: String, val platform: String)
+    private data class Registration(val deviceId: String?, val code: String?, val name: String, val platform: String)
     @Volatile private var pendingRegistration: Registration? = null
 
     fun connect(url: String) {
@@ -61,8 +61,8 @@ class SignalingClient(
         webSocket = httpClient.newWebSocket(request, listener)
     }
 
-    fun setRegistration(deviceId: String?, name: String, platform: String) {
-        pendingRegistration = Registration(deviceId, name, platform)
+    fun setRegistration(deviceId: String?, code: String?, name: String, platform: String) {
+        pendingRegistration = Registration(deviceId, code, name, platform)
         sendRegistration()
     }
 
@@ -72,6 +72,7 @@ class SignalingClient(
             put("type", JsonPrimitive("register"))
             put("role", JsonPrimitive("agent"))
             reg.deviceId?.let { put("deviceId", JsonPrimitive(it)) }
+            reg.code?.let { put("code", JsonPrimitive(it)) }
             put("name", JsonPrimitive(reg.name))
             put("platform", JsonPrimitive(reg.platform))
         }

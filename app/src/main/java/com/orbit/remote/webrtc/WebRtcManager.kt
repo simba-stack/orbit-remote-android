@@ -58,6 +58,7 @@ class WebRtcManager(
     private var videoCapturer: ScreenCapturerAndroid? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
+    private var videoSender: org.webrtc.RtpSender? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var dataChannel: DataChannel? = null
 
@@ -147,7 +148,34 @@ class WebRtcManager(
         val track = factory.createVideoTrack("orbit_video", source)
         track.setEnabled(true)
         videoTrack = track
-        peerConnection?.addTrack(track, listOf("orbit_stream"))
+        videoSender = peerConnection?.addTrack(track, listOf("orbit_stream"))
+        applyVideoEncodingParams(fps)
+    }
+
+    /**
+     * Give the encoder a sensible bitrate window and prioritise SMOOTHNESS.
+     *
+     * Without an explicit floor the bandwidth estimator can starve the encoder and
+     * the screen looks frozen. We set a moderate ceiling (won't saturate a relay /
+     * mobile uplink, so the control data channel stays responsive) plus a floor so
+     * quality never collapses, and MAINTAIN_FRAMERATE so under load it drops
+     * resolution rather than stalling/freezing the motion. The parameters object is
+     * a copy and must be reassigned after mutation.
+     */
+    private fun applyVideoEncodingParams(targetFps: Int) {
+        val sender = videoSender ?: return
+        runCatching {
+            val params = sender.parameters ?: return
+            if (params.encodings.isEmpty()) return
+            params.degradationPreference =
+                org.webrtc.RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
+            params.encodings[0].apply {
+                maxBitrateBps = 3_500_000   // moderate: smooth, but won't choke control
+                minBitrateBps = 800_000     // floor so the picture never freezes to mush
+                maxFramerate = targetFps
+            }
+            sender.parameters = params
+        }
     }
 
     /** Apply an offer or ICE candidate relayed from the controller. */
@@ -203,6 +231,7 @@ class WebRtcManager(
         surfaceTextureHelper = null
         videoSource = null
         videoTrack = null
+        videoSender = null
         dataChannel = null
         peerConnection = null
     }

@@ -22,7 +22,7 @@ android {
         buildConfigField(
             "String",
             "DEFAULT_SIGNALING_URL",
-            "\"wss://orbit-remote-signaling-production.up.railway.app/ws\""
+            "\"wss://v3169940.hosted-by-vdsina.ru/ws\""
         )
     }
 
